@@ -11,7 +11,7 @@ import {
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
 
-// Importación estricta de tipos e interfaces
+// Importación de tipos e utilidades
 import type { CsvRow, CustomerGroup } from './utils/excelGenerator';
 import {
   detectCountry,
@@ -50,12 +50,7 @@ interface AppUser {
   country: string;
 }
 
-// Claves estáticas para almacenamiento local
-const STORAGE_KEYS = {
-  USERS: 'finops_app_users_v1',
-  CSV_ROWS: 'finops_app_csv_rows_v1',
-  LOADED_FILES: 'finops_app_loaded_files_v1'
-};
+const STORAGE_USERS_KEY = 'finops_app_users_v2';
 
 const DEFAULT_USERS: AppUser[] = [
   { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
@@ -64,13 +59,11 @@ const DEFAULT_USERS: AppUser[] = [
 ];
 
 export default function App() {
-  // Estado para la autenticación y control de acceso
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [loginEmailInput, setLoginEmailInput] = useState<string>('');
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
-  // Clave del administrador principal
   const ADMIN_PASSWORD_SECRET = 'Tivit2026!';
   const PRIMARY_ADMIN_EMAIL = 'yeimy.sonntag@tivit.com';
 
@@ -81,109 +74,63 @@ export default function App() {
     country: 'Todos'
   });
 
-  // 1. INICIALIZACIÓN DE USUARIOS CON LOCALSTORAGE
+  // Lista de Usuarios
   const [usersList, setUsersList] = useState<AppUser[]>(() => {
     try {
-      const savedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
-      return savedUsers ? JSON.parse(savedUsers) : DEFAULT_USERS;
-    } catch (e) {
-      console.error('Error cargando usuarios desde localStorage:', e);
+      const saved = localStorage.getItem(STORAGE_USERS_KEY);
+      return saved ? JSON.parse(saved) : DEFAULT_USERS;
+    } catch {
       return DEFAULT_USERS;
     }
   });
 
-  // 2. INICIALIZACIÓN DE FILAS CSV CON LOCALSTORAGE
-  const [csvRows, setCsvRows] = useState<CsvRow[]>(() => {
-    try {
-      const savedRows = localStorage.getItem(STORAGE_KEYS.CSV_ROWS);
-      return savedRows ? JSON.parse(savedRows) : [];
-    } catch (e) {
-      console.error('Error cargando registros CSV desde localStorage:', e);
-      return [];
-    }
-  });
-
-  // 3. INICIALIZACIÓN DE ARCHIVOS CARGADOS CON LOCALSTORAGE
-  const [loadedFiles, setLoadedFiles] = useState<string[]>(() => {
-    try {
-      const savedFiles = localStorage.getItem(STORAGE_KEYS.LOADED_FILES);
-      return savedFiles ? JSON.parse(savedFiles) : [];
-    } catch (e) {
-      console.error('Error cargando nombre de archivos desde localStorage:', e);
-      return [];
-    }
-  });
-
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [loadedFiles, setLoadedFiles] = useState<string[]>([]);
   const [selectedCostKey, setSelectedCostKey] = useState<string>('paygCostInUsd');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedCountryFilter, setSelectedCountryFilter] = useState<string>('Todos');
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerGroup | null>(null);
 
-  // Estados para el formulario de registro de nuevos usuarios/roles
   const [newUserEmail, setNewUserEmail] = useState<string>('');
   const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
   const [newUserCountry, setNewUserCountry] = useState<string>('Chile');
 
-  // EFECTOS PARA GUARDAR AUTOMÁTICAMENTE EN LOCALSTORAGE TRAS CADA CAMBIO
+  // Guardar usuarios en localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(usersList));
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
   }, [usersList]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.CSV_ROWS, JSON.stringify(csvRows));
-    } catch (e) {
-      console.warn('Límite de cuota de localStorage alcanzado para los registros CSV');
-    }
-  }, [csvRows]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.LOADED_FILES, JSON.stringify(loadedFiles));
-  }, [loadedFiles]);
-
-  // AUTENTICACIÓN Y VALIDACIÓN DE ROLES
+  // AUTENTICACIÓN
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
-
     const cleanEmail = loginEmailInput.trim().toLowerCase();
 
-    // 1. Validar dominio corporativo @tivit.com o @tivit.cl
     const hasValidDomain = cleanEmail.endsWith('@tivit.com') || cleanEmail.endsWith('@tivit.cl');
     if (!hasValidDomain) {
-      setErrorMessage('Acceso denegado: El correo debe pertenecer al dominio @tivit.com o @tivit.cl');
+      setErrorMessage('Acceso denegado: El correo debe pertenecer a @tivit.com o @tivit.cl');
       return;
     }
 
-    // 2. Administrador Principal por Defecto
     if (cleanEmail === PRIMARY_ADMIN_EMAIL) {
       if (adminPasswordInput !== ADMIN_PASSWORD_SECRET) {
         setErrorMessage('Contraseña de administrador incorrecta.');
         return;
       }
-      setCurrentUser({
-        id: 0,
-        email: cleanEmail,
-        role: 'admin',
-        country: 'Todos'
-      });
+      setCurrentUser({ id: 0, email: cleanEmail, role: 'admin', country: 'Todos' });
       setIsAuthenticated(true);
       return;
     }
 
-    // 3. Buscar en la lista de usuarios autorizados previamente por el admin
     const registeredUser = usersList.find(u => u.email.toLowerCase() === cleanEmail);
     if (!registeredUser) {
       setErrorMessage('Acceso denegado: Este correo no está autorizado por el Administrador.');
       return;
     }
 
-    // Si el usuario registrado fue asignado como Administrador, pedir contraseña
-    if (registeredUser.role === 'admin') {
-      if (adminPasswordInput !== ADMIN_PASSWORD_SECRET) {
-        setErrorMessage('Contraseña de administrador incorrecta.');
-        return;
-      }
+    if (registeredUser.role === 'admin' && adminPasswordInput !== ADMIN_PASSWORD_SECRET) {
+      setErrorMessage('Contraseña de administrador incorrecta.');
+      return;
     }
 
     setCurrentUser({
@@ -202,7 +149,7 @@ export default function App() {
     setErrorMessage('');
   };
 
-  // CARGA MÚLTIPLE DE HASTA 3 ARCHIVOS CSV CON PERSISTENCIA
+  // PROCESAMIENTO ROBUSTO DE ARCHIVOS CSV
   const handleMultipleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -218,12 +165,12 @@ export default function App() {
         header: true,
         skipEmptyLines: true,
         complete: (result) => {
-          const rowsWithFileRef = result.data.map(r => ({
+          const rowsWithRef = result.data.map(r => ({
             ...r,
             _sourceFileName: file.name
           }));
 
-          combinedRows = [...combinedRows, ...rowsWithFileRef];
+          combinedRows = [...combinedRows, ...rowsWithRef];
           processedCount++;
 
           if (processedCount === fileList.length) {
@@ -231,15 +178,11 @@ export default function App() {
             setLoadedFiles(fileNames);
 
             if (combinedRows.length > 0) {
-              const firstRow = combinedRows[0];
-              const keys = Object.keys(firstRow).filter(k =>
-                k.toLowerCase().includes('cost') || k.toLowerCase().includes('price')
-              );
-              if (keys.includes('paygCostInUsd')) {
-                setSelectedCostKey('paygCostInUsd');
-              } else if (keys.length > 0) {
-                setSelectedCostKey(keys[0]);
-              }
+              const sampleKeys = Object.keys(combinedRows[0]);
+              const costKey = sampleKeys.find(k => 
+                /cost|price|payg|monto/i.test(k)
+              ) || 'paygCostInUsd';
+              setSelectedCostKey(costKey);
             }
             setSelectedCustomer(null);
           }
@@ -248,40 +191,34 @@ export default function App() {
     });
   };
 
-  // LIMPIAR TODOS LOS DATOS CARGADOS (SOLO ADMIN)
-  const handleClearData = () => {
-    if (window.confirm('¿Deseas eliminar todos los registros de consumos subidos?')) {
-      setCsvRows([]);
-      setLoadedFiles([]);
-      setSelectedCustomer(null);
-      localStorage.removeItem(STORAGE_KEYS.CSV_ROWS);
-      localStorage.removeItem(STORAGE_KEYS.LOADED_FILES);
-    }
-  };
-
   const periodDetected = useMemo(() => {
     if (!csvRows.length) return '202609';
     const sample = csvRows.find(r => r.billingPeriodEndDate || r.date)?.billingPeriodEndDate;
-    if (sample) {
-      const clean = String(sample).replace(/[-/]/g, '');
-      return clean.substring(0, 6);
-    }
-    return '202609';
+    return sample ? String(sample).replace(/[-/]/g, '').substring(0, 6) : '202609';
   }, [csvRows]);
 
+  // AGRUPACIÓN POR CLIENTE Y PAÍS
   const { groupedByCountry, allCustomersList } = useMemo(() => {
     const countryMap: Record<string, Record<string, CustomerGroup>> = {};
     const list: CustomerGroup[] = [];
 
     csvRows.forEach(row => {
-      const custName = row.customerName || row.invoiceSectionName || 'Cliente_General';
+      // Normalizar nombres de columnas
+      const custName = 
+        row.customerName || 
+        row.CustomerName || 
+        row.invoiceSectionName || 
+        row.InvoiceSectionName || 
+        'Cliente_General';
+
       const fileRef = (row as any)._sourceFileName || '';
       const country = detectCountry(`${custName}_${row.invoiceSectionName || ''}_${fileRef}`);
-      const cost = parseFloat(String(row[selectedCostKey] || row.paygCostInUsd || row.costInUsd || 0));
 
-      if (!countryMap[country]) {
-        countryMap[country] = {};
-      }
+      // Normalizar costo numérico
+      const rawCost = row[selectedCostKey] || row.paygCostInUsd || row.Cost || row.costInUsd || 0;
+      const cost = parseFloat(String(rawCost).replace(',', '.')) || 0;
+
+      if (!countryMap[country]) countryMap[country] = {};
 
       if (!countryMap[country][custName]) {
         const newGroup: CustomerGroup = {
@@ -299,14 +236,14 @@ export default function App() {
       group.totalCost += cost;
       group.records.push(row);
 
-      const category = row.meterCategory || 'Otros';
+      const category = row.meterCategory || row.MeterCategory || 'Otros';
       group.categoryTotals[category] = (group.categoryTotals[category] || 0) + cost;
     });
 
     return { groupedByCountry: countryMap, allCustomersList: list };
   }, [csvRows, selectedCostKey]);
 
-  // FILTRADO SEGÚN ROL Y PAÍS PERMITIDO
+  // FILTRADO POR USUARIO Y BÚSQUEDA
   const visibleCustomers = useMemo(() => {
     return allCustomersList.filter(cust => {
       if (currentUser.role === 'user' && currentUser.country !== 'Todos') {
@@ -326,7 +263,7 @@ export default function App() {
     return visibleCustomers.reduce((acc, curr) => acc + curr.totalCost, 0);
   }, [visibleCustomers]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (visibleCustomers.length > 0) {
       if (!selectedCustomer || !visibleCustomers.some(c => c.name === selectedCustomer.name && c.country === selectedCustomer.country)) {
         setSelectedCustomer(visibleCustomers[0]);
@@ -339,15 +276,12 @@ export default function App() {
   const chartData = useMemo(() => {
     if (!selectedCustomer) return null;
     const sorted = Object.entries(selectedCustomer.categoryTotals).sort((a, b) => b[1] - a[1]);
-    const labels = sorted.map(e => e[0]);
-    const dataValues = sorted.map(e => e[1]);
-
     return {
-      labels,
+      labels: sorted.map(e => e[0]),
       datasets: [
         {
           label: `Consumo USD (${selectedCostKey})`,
-          data: dataValues,
+          data: sorted.map(e => e[1]),
           backgroundColor: '#0284c7',
           borderRadius: 6
         }
@@ -355,19 +289,18 @@ export default function App() {
     };
   }, [selectedCustomer, selectedCostKey]);
 
-  // ASIGNACIÓN Y GESTIÓN DE ROLES/USUARIOS POR EL ADMINISTRADOR
+  // GESTIÓN DE ROLES POR EL ADMIN
   const handleAddUser = (e: FormEvent) => {
     e.preventDefault();
     const cleanNewEmail = newUserEmail.trim().toLowerCase();
 
-    const hasValidDomain = cleanNewEmail.endsWith('@tivit.com') || cleanNewEmail.endsWith('@tivit.cl');
-    if (!hasValidDomain) {
-      alert('Error: Solo se pueden autorizar correos con dominio @tivit.com o @tivit.cl');
+    if (!cleanNewEmail.endsWith('@tivit.com') && !cleanNewEmail.endsWith('@tivit.cl')) {
+      alert('Error: Solo se permiten correos @tivit.com o @tivit.cl');
       return;
     }
 
     if (usersList.some(u => u.email.toLowerCase() === cleanNewEmail)) {
-      alert('El usuario ya se encuentra en la lista. Puedes cambiar su rol o eliminarlo más abajo.');
+      alert('El usuario ya existe en la lista.');
       return;
     }
 
@@ -382,29 +315,22 @@ export default function App() {
     setNewUserEmail('');
   };
 
-  // CAMBIAR ROL DE USUARIO
   const handleToggleUserRole = (id: number) => {
     setUsersList(prev => prev.map(u => {
       if (u.id === id) {
         const nextRole = u.role === 'admin' ? 'user' : 'admin';
-        return {
-          ...u,
-          role: nextRole,
-          country: nextRole === 'admin' ? 'Todos' : u.country
-        };
+        return { ...u, role: nextRole, country: nextRole === 'admin' ? 'Todos' : u.country };
       }
       return u;
     }));
   };
 
-  // ELIMINAR USUARIO/REVOCAR ACCESO
   const handleDeleteUser = (id: number, email: string) => {
-    if (window.confirm(`¿Estás seguro de revocar el acceso a ${email}?`)) {
+    if (window.confirm(`¿Deseas revocar el acceso a ${email}?`)) {
       setUsersList(prev => prev.filter(u => u.id !== id));
     }
   };
 
-  // MODAL LOGIN SEGURO CON DETECCIÓN DE ROL Y CLAVE
   if (!isAuthenticated) {
     const cleanInputEmail = loginEmailInput.trim().toLowerCase();
     const isPrimaryAdmin = cleanInputEmail === PRIMARY_ADMIN_EMAIL;
@@ -446,7 +372,7 @@ export default function App() {
             </div>
 
             {requiresPassword && (
-              <div className="space-y-1 animate-fadeIn">
+              <div className="space-y-1">
                 <label className="block text-xs font-bold text-slate-700 flex items-center space-x-1">
                   <KeyRound className="w-3.5 h-3.5 text-sky-600" />
                   <span>Contraseña Administrador</span>
@@ -464,7 +390,7 @@ export default function App() {
 
             <button
               type="submit"
-              className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs py-3 rounded-xl shadow-lg shadow-sky-600/20 transition flex items-center justify-center space-x-2"
+              className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs py-3 rounded-xl shadow-lg transition flex items-center justify-center space-x-2"
             >
               <UserCheck className="w-4 h-4" />
               <span>Ingresar a la Plataforma</span>
@@ -477,7 +403,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
-      {/* ENCABEZADO PRINCIPAL */}
       <header className="bg-slate-900 text-white sticky top-0 z-50 border-b border-slate-800 shadow-lg">
         <div className="max-w-7xl mx-auto px-6 h-16 flex justify-between items-center">
           <div className="flex items-center space-x-3">
@@ -493,7 +418,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-4 text-xs">
-            <div className="bg-slate-800 px-3.5 py-1.5 rounded-full border border-slate-700/80 flex items-center space-x-2">
+            <div className="bg-slate-800 px-3.5 py-1.5 rounded-full border border-slate-700 flex items-center space-x-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span className="text-slate-300 font-medium">{currentUser.email}</span>
               <span className="bg-sky-500/20 text-sky-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
@@ -512,7 +437,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* CONTENIDO PRINCIPAL */}
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {currentUser.role === 'admin' ? (
@@ -522,13 +446,13 @@ export default function App() {
                   <Upload className="w-4 h-4 text-sky-600" />
                   <span>Cargar Consumos Azure (Hasta 3 CSVs)</span>
                 </h2>
-                <p className="text-xs text-slate-500 mt-1">Sube los extractos billing de la operación regional para actualizar datos.</p>
+                <p className="text-xs text-slate-500 mt-1">Sube los extractos billing de la operación regional.</p>
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                <label className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow-md shadow-sky-600/20 flex items-center space-x-2">
+                <label className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow flex items-center space-x-2">
                   <FileSpreadsheet className="w-4 h-4" />
-                  <span>Cargar CSVs</span>
+                  <span>Seleccionar Archivos CSV</span>
                   <input type="file" accept=".csv" multiple onChange={handleMultipleFileUpload} className="hidden" />
                 </label>
 
@@ -538,13 +462,6 @@ export default function App() {
                     <span className="text-xs font-bold text-slate-700">
                       {loadedFiles.length} archivo(s) ({csvRows.length.toLocaleString()} filas)
                     </span>
-                    <button
-                      onClick={handleClearData}
-                      className="text-xs text-red-600 hover:underline ml-2"
-                      title="Limpiar datos subidos"
-                    >
-                      Limpiar
-                    </button>
                   </div>
                 )}
               </div>
@@ -556,7 +473,7 @@ export default function App() {
               </div>
               <div>
                 <h2 className="text-sm font-bold text-slate-900">Operación Asignada: {currentUser.country}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Acceso restringido para auditoría y descarga de informes de {currentUser.country}.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Acceso a informes e indicadores de {currentUser.country}.</p>
               </div>
             </div>
           )}
@@ -588,7 +505,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* NAVEGACIÓN Y CLIENTES */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
@@ -627,14 +543,14 @@ export default function App() {
             ) : (
               <div className="flex items-center space-x-1.5 text-xs text-sky-700 bg-sky-50 px-3 py-1.5 rounded-lg border border-sky-100 font-bold">
                 <Globe className="w-3.5 h-3.5" />
-                <span>Filtro de Seguridad Activo: {currentUser.country}</span>
+                <span>Filtro Activo: {currentUser.country}</span>
               </div>
             )}
 
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
               {visibleCustomers.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-8">
-                  {csvRows.length === 0 ? 'Cargue un CSV para listar clientes' : `Sin datos para ${currentUser.country}`}
+                  {csvRows.length === 0 ? 'Cargue un archivo CSV para ver los datos' : `Sin datos registrados para ${currentUser.country}`}
                 </p>
               ) : (
                 visibleCustomers.map(cust => (
@@ -662,7 +578,6 @@ export default function App() {
               )}
             </div>
 
-            {/* PANEL DE ASIGNACIÓN DE ROLES Y REGISTRO DE USUARIOS (SOLO ADMINISTRADOR) */}
             {currentUser.role === 'admin' && (
               <div className="border-t pt-4 space-y-3">
                 <h4 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
@@ -714,7 +629,6 @@ export default function App() {
                   </button>
                 </form>
 
-                {/* GESTIÓN RÁPIDA DE USUARIOS AUTORIZADOS CON BOTÓN ELIMINAR */}
                 <div className="space-y-1.5 pt-2">
                   <p className="text-[10px] font-bold text-slate-400 uppercase">Usuarios Autorizados ({usersList.length})</p>
                   <div className="max-h-28 overflow-y-auto space-y-1 custom-scrollbar">
@@ -729,7 +643,6 @@ export default function App() {
                           <button
                             onClick={() => handleToggleUserRole(user.id)}
                             className="text-[10px] font-bold bg-slate-200 hover:bg-sky-100 text-slate-700 hover:text-sky-800 px-2 py-1 rounded transition"
-                            title="Cambiar Rol"
                           >
                             {user.role === 'admin' ? 'Hacer Usuario' : 'Hacer Admin'}
                           </button>
@@ -737,7 +650,6 @@ export default function App() {
                           <button
                             onClick={() => handleDeleteUser(user.id, user.email)}
                             className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded transition"
-                            title="Eliminar acceso de usuario"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -789,7 +701,7 @@ export default function App() {
                   <div className="border border-slate-200/80 p-4 rounded-xl bg-slate-50/50 space-y-2">
                     <h4 className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <BarChart3 className="w-4 h-4 text-sky-600" />
-                      <span>Distribución por Categoría de Servicio (meterCategory)</span>
+                      <span>Distribución por Categoría de Servicio</span>
                     </h4>
                     <div className="h-52">
                       <Bar data={chartData} options={{ responsive: true, maintainAspectRatio: false }} />
