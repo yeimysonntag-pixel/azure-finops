@@ -1,4 +1,4 @@
-import React, { useState, useMemo, ChangeEvent, FormEvent } from 'react';
+import React, { useState, useMemo, ChangeEvent, FormEvent, useEffect } from 'react';
 import Papa from 'papaparse';
 import {
   Chart as ChartJS,
@@ -29,7 +29,6 @@ import {
   BarChart3,
   Building2,
   Layers,
-  ShieldCheck,
   TrendingUp,
   CheckCircle2,
   Globe,
@@ -51,6 +50,19 @@ interface AppUser {
   country: string;
 }
 
+// Claves estáticas para almacenamiento local
+const STORAGE_KEYS = {
+  USERS: 'finops_app_users_v1',
+  CSV_ROWS: 'finops_app_csv_rows_v1',
+  LOADED_FILES: 'finops_app_loaded_files_v1'
+};
+
+const DEFAULT_USERS: AppUser[] = [
+  { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
+  { id: 2, email: 'colombia.mgr@tivit.com', role: 'user', country: 'Colombia' },
+  { id: 3, email: 'peru.mgr@tivit.com', role: 'user', country: 'Perú' }
+];
+
 export default function App() {
   // Estado para la autenticación y control de acceso
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -69,15 +81,39 @@ export default function App() {
     country: 'Todos'
   });
 
-  // Lista dinámica de usuarios gestionada por el administrador
-  const [usersList, setUsersList] = useState<AppUser[]>([
-    { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
-    { id: 2, email: 'colombia.mgr@tivit.com', role: 'user', country: 'Colombia' },
-    { id: 3, email: 'peru.mgr@tivit.com', role: 'user', country: 'Perú' }
-  ]);
+  // 1. INICIALIZACIÓN DE USUARIOS CON LOCALSTORAGE
+  const [usersList, setUsersList] = useState<AppUser[]>(() => {
+    try {
+      const savedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+      return savedUsers ? JSON.parse(savedUsers) : DEFAULT_USERS;
+    } catch (e) {
+      console.error('Error cargando usuarios desde localStorage:', e);
+      return DEFAULT_USERS;
+    }
+  });
 
-  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
-  const [loadedFiles, setLoadedFiles] = useState<string[]>([]);
+  // 2. INICIALIZACIÓN DE FILAS CSV CON LOCALSTORAGE
+  const [csvRows, setCsvRows] = useState<CsvRow[]>(() => {
+    try {
+      const savedRows = localStorage.getItem(STORAGE_KEYS.CSV_ROWS);
+      return savedRows ? JSON.parse(savedRows) : [];
+    } catch (e) {
+      console.error('Error cargando registros CSV desde localStorage:', e);
+      return [];
+    }
+  });
+
+  // 3. INICIALIZACIÓN DE ARCHIVOS CARGADOS CON LOCALSTORAGE
+  const [loadedFiles, setLoadedFiles] = useState<string[]>(() => {
+    try {
+      const savedFiles = localStorage.getItem(STORAGE_KEYS.LOADED_FILES);
+      return savedFiles ? JSON.parse(savedFiles) : [];
+    } catch (e) {
+      console.error('Error cargando nombre de archivos desde localStorage:', e);
+      return [];
+    }
+  });
+
   const [selectedCostKey, setSelectedCostKey] = useState<string>('paygCostInUsd');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedCountryFilter, setSelectedCountryFilter] = useState<string>('Todos');
@@ -87,6 +123,23 @@ export default function App() {
   const [newUserEmail, setNewUserEmail] = useState<string>('');
   const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
   const [newUserCountry, setNewUserCountry] = useState<string>('Chile');
+
+  // EFECTOS PARA GUARDAR AUTOMÁTICAMENTE EN LOCALSTORAGE TRAS CADA CAMBIO
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(usersList));
+  }, [usersList]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CSV_ROWS, JSON.stringify(csvRows));
+    } catch (e) {
+      console.warn('Límite de cuota de localStorage alcanzado para los registros CSV');
+    }
+  }, [csvRows]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.LOADED_FILES, JSON.stringify(loadedFiles));
+  }, [loadedFiles]);
 
   // AUTENTICACIÓN Y VALIDACIÓN DE ROLES
   const handleLogin = (e: FormEvent) => {
@@ -149,14 +202,13 @@ export default function App() {
     setErrorMessage('');
   };
 
-  // CARGA MÚLTIPLE DE HASTA 3 ARCHIVOS CSV
+  // CARGA MÚLTIPLE DE HASTA 3 ARCHIVOS CSV CON PERSISTENCIA
   const handleMultipleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const fileList = Array.from(files).slice(0, 3);
     const fileNames = fileList.map(f => f.name);
-    setLoadedFiles(fileNames);
 
     let combinedRows: CsvRow[] = [];
     let processedCount = 0;
@@ -176,6 +228,7 @@ export default function App() {
 
           if (processedCount === fileList.length) {
             setCsvRows(combinedRows);
+            setLoadedFiles(fileNames);
 
             if (combinedRows.length > 0) {
               const firstRow = combinedRows[0];
@@ -193,6 +246,17 @@ export default function App() {
         }
       });
     });
+  };
+
+  // LIMPIAR TODOS LOS DATOS CARGADOS (SOLO ADMIN)
+  const handleClearData = () => {
+    if (window.confirm('¿Deseas eliminar todos los registros de consumos subidos?')) {
+      setCsvRows([]);
+      setLoadedFiles([]);
+      setSelectedCustomer(null);
+      localStorage.removeItem(STORAGE_KEYS.CSV_ROWS);
+      localStorage.removeItem(STORAGE_KEYS.LOADED_FILES);
+    }
   };
 
   const periodDetected = useMemo(() => {
@@ -314,13 +378,13 @@ export default function App() {
       country: newUserRole === 'admin' ? 'Todos' : newUserCountry
     };
 
-    setUsersList([...usersList, newUser]);
+    setUsersList(prev => [...prev, newUser]);
     setNewUserEmail('');
   };
 
   // CAMBIAR ROL DE USUARIO
   const handleToggleUserRole = (id: number) => {
-    setUsersList(usersList.map(u => {
+    setUsersList(prev => prev.map(u => {
       if (u.id === id) {
         const nextRole = u.role === 'admin' ? 'user' : 'admin';
         return {
@@ -336,7 +400,7 @@ export default function App() {
   // ELIMINAR USUARIO/REVOCAR ACCESO
   const handleDeleteUser = (id: number, email: string) => {
     if (window.confirm(`¿Estás seguro de revocar el acceso a ${email}?`)) {
-      setUsersList(usersList.filter(u => u.id !== id));
+      setUsersList(prev => prev.filter(u => u.id !== id));
     }
   };
 
@@ -474,6 +538,13 @@ export default function App() {
                     <span className="text-xs font-bold text-slate-700">
                       {loadedFiles.length} archivo(s) ({csvRows.length.toLocaleString()} filas)
                     </span>
+                    <button
+                      onClick={handleClearData}
+                      className="text-xs text-red-600 hover:underline ml-2"
+                      title="Limpiar datos subidos"
+                    >
+                      Limpiar
+                    </button>
                   </div>
                 )}
               </div>
