@@ -11,7 +11,7 @@ import {
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
 
-// Importación de tipos e utilidades
+// Importación estricta de tipos e interfaces
 import type { CsvRow, CustomerGroup } from './utils/excelGenerator';
 import {
   detectCountry,
@@ -38,8 +38,7 @@ import {
   AlertCircle,
   KeyRound,
   UserPlus,
-  Trash2,
-  RefreshCw
+  Trash2
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -51,10 +50,9 @@ interface AppUser {
   country: string;
 }
 
-// Configuración de sincronización compartida
-const LOCAL_STORAGE_USERS = 'finops_app_users_v3';
-const LOCAL_STORAGE_CSV = 'finops_app_csv_rows_v3';
-const LOCAL_STORAGE_FILES = 'finops_app_loaded_files_v3';
+const STORAGE_USERS_KEY = 'tivit_finops_users_v4';
+const STORAGE_CSV_KEY = 'tivit_finops_csv_v4';
+const STORAGE_FILES_KEY = 'tivit_finops_files_v4';
 
 const DEFAULT_USERS: AppUser[] = [
   { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
@@ -67,7 +65,6 @@ export default function App() {
   const [loginEmailInput, setLoginEmailInput] = useState<string>('');
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const ADMIN_PASSWORD_SECRET = 'Tivit2026!';
   const PRIMARY_ADMIN_EMAIL = 'yeimy.sonntag@tivit.com';
@@ -79,20 +76,20 @@ export default function App() {
     country: 'Todos'
   });
 
-  // 1. Estado de Usuarios
+  // 1. USUARIOS GUARDADOS (PERSISTENCIA)
   const [usersList, setUsersList] = useState<AppUser[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_USERS);
+      const saved = localStorage.getItem(STORAGE_USERS_KEY);
       return saved ? JSON.parse(saved) : DEFAULT_USERS;
     } catch {
       return DEFAULT_USERS;
     }
   });
 
-  // 2. Estado de Registros CSV y Archivos
+  // 2. REGISTROS CSV GUARDADOS
   const [csvRows, setCsvRows] = useState<CsvRow[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_CSV);
+      const saved = localStorage.getItem(STORAGE_CSV_KEY);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -101,7 +98,7 @@ export default function App() {
 
   const [loadedFiles, setLoadedFiles] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_FILES);
+      const saved = localStorage.getItem(STORAGE_FILES_KEY);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -117,46 +114,68 @@ export default function App() {
   const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
   const [newUserCountry, setNewUserCountry] = useState<string>('Chile');
 
-  // Sincronización continua en localStorage local
+  // Guardar usuarios creados automáticamente
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_USERS, JSON.stringify(usersList));
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
   }, [usersList]);
 
+  // Guardar CSVs procesados automáticamente
   useEffect(() => {
     try {
-      localStorage.setItem(LOCAL_STORAGE_CSV, JSON.stringify(csvRows));
-      localStorage.setItem(LOCAL_STORAGE_FILES, JSON.stringify(loadedFiles));
+      localStorage.setItem(STORAGE_CSV_KEY, JSON.stringify(csvRows));
+      localStorage.setItem(STORAGE_FILES_KEY, JSON.stringify(loadedFiles));
     } catch (e) {
-      console.warn('Límite de memoria local excedido.');
+      console.warn('Almacenamiento de navegador lleno.');
     }
   }, [csvRows, loadedFiles]);
 
-  // Carga opcional de respaldos estáticos del repositorio
-  const loadSharedDataset = async () => {
-    setIsSyncing(true);
-    try {
-      const response = await fetch('./data/consumos_global.csv');
-      if (response.ok) {
-        const text = await response.text();
-        Papa.parse<CsvRow>(text, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (result) => {
-            setCsvRows(result.data);
-            setLoadedFiles(['consumos_global.csv']);
-          }
-        });
-      }
-    } catch (e) {
-      console.log('No se encontró dataset público estático.');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
+  // CARGA AUTOMÁTICA DE ARCHIVOS CSV DESDE EL REPOSITORIO (PÚBLICOS)
   useEffect(() => {
-    if (isAuthenticated && csvRows.length === 0) {
-      loadSharedDataset();
+    const fetchRepoCsvFiles = async () => {
+      if (csvRows.length > 0) return; // Si ya hay datos, no reescribir
+
+      const repoCsvPaths = [
+        './data/consumos_chile.csv',
+        './data/consumos_colombia.csv',
+        './data/consumos_peru.csv'
+      ];
+
+      let allRows: CsvRow[] = [];
+      let loadedNames: string[] = [];
+
+      for (const path of repoCsvPaths) {
+        try {
+          const res = await fetch(path);
+          if (res.ok) {
+            const csvText = await res.text();
+            const fileName = path.split('/').pop() || 'archivo.csv';
+            
+            Papa.parse<CsvRow>(csvText, {
+              header: true,
+              skipEmptyLines: true,
+              complete: (results) => {
+                const rowsWithSource = results.data.map(r => ({
+                  ...r,
+                  _sourceFileName: fileName
+                }));
+                allRows = [...allRows, ...rowsWithSource];
+                loadedNames.push(fileName);
+              }
+            });
+          }
+        } catch (e) {
+          console.log('Esperando archivo CSV público...');
+        }
+      }
+
+      if (allRows.length > 0) {
+        setCsvRows(allRows);
+        setLoadedFiles(loadedNames);
+      }
+    };
+
+    if (isAuthenticated) {
+      fetchRepoCsvFiles();
     }
   }, [isAuthenticated]);
 
@@ -168,7 +187,7 @@ export default function App() {
 
     const hasValidDomain = cleanEmail.endsWith('@tivit.com') || cleanEmail.endsWith('@tivit.cl');
     if (!hasValidDomain) {
-      setErrorMessage('Acceso denegado: El correo debe pertenecer a @tivit.com o @tivit.cl');
+      setErrorMessage('Acceso denegado: Debe usar su correo @tivit.com o @tivit.cl');
       return;
     }
 
@@ -209,7 +228,7 @@ export default function App() {
     setErrorMessage('');
   };
 
-  // PROCESAMIENTO ROBUSTO DE ARCHIVOS CSV
+  // PROCESAMIENTO MULTI-CSV
   const handleMultipleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -252,12 +271,12 @@ export default function App() {
   };
 
   const handleClearData = () => {
-    if (window.confirm('¿Deseas limpiar todos los consumos cargados?')) {
+    if (window.confirm('¿Deseas limpiar todos los registros CSV procesados?')) {
       setCsvRows([]);
       setLoadedFiles([]);
       setSelectedCustomer(null);
-      localStorage.removeItem(LOCAL_STORAGE_CSV);
-      localStorage.removeItem(LOCAL_STORAGE_FILES);
+      localStorage.removeItem(STORAGE_CSV_KEY);
+      localStorage.removeItem(STORAGE_FILES_KEY);
     }
   };
 
@@ -267,7 +286,7 @@ export default function App() {
     return sample ? String(sample).replace(/[-/]/g, '').substring(0, 6) : '202609';
   }, [csvRows]);
 
-  // AGRUPACIÓN POR CLIENTE Y PAÍS
+  // AGRUPACIÓN MULTIPAÍS Y CLIENTE
   const { groupedByCountry, allCustomersList } = useMemo(() => {
     const countryMap: Record<string, Record<string, CustomerGroup>> = {};
     const list: CustomerGroup[] = [];
@@ -311,7 +330,7 @@ export default function App() {
     return { groupedByCountry: countryMap, allCustomersList: list };
   }, [csvRows, selectedCostKey]);
 
-  // FILTRADO POR USUARIO Y BÚSQUEDA
+  // FILTRADO DE CLIENTES VISIBLES
   const visibleCustomers = useMemo(() => {
     return allCustomersList.filter(cust => {
       if (currentUser.role === 'user' && currentUser.country !== 'Todos') {
@@ -357,13 +376,13 @@ export default function App() {
     };
   }, [selectedCustomer, selectedCostKey]);
 
-  // REGISTRO Y GESTIÓN DE ROLES POR EL ADMIN
+  // AGREGAR Y GUARDAR USUARIOS
   const handleAddUser = (e: FormEvent) => {
     e.preventDefault();
     const cleanNewEmail = newUserEmail.trim().toLowerCase();
 
     if (!cleanNewEmail.endsWith('@tivit.com') && !cleanNewEmail.endsWith('@tivit.cl')) {
-      alert('Error: Solo se permiten correos @tivit.com o @tivit.cl');
+      alert('Error: Solo se autorizan correos @tivit.com o @tivit.cl');
       return;
     }
 
@@ -528,7 +547,7 @@ export default function App() {
                   <div className="flex items-center space-x-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     <span className="text-xs font-bold text-slate-700">
-                      {loadedFiles.length} archivo(s) ({csvRows.length.toLocaleString()} filas)
+                      {loadedFiles.length} archivo(s) CSV ({csvRows.length.toLocaleString()} filas)
                     </span>
                     <button onClick={handleClearData} className="text-xs text-red-600 hover:underline ml-2">
                       Limpiar
@@ -621,7 +640,7 @@ export default function App() {
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
               {visibleCustomers.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-8">
-                  {csvRows.length === 0 ? 'Cargue un archivo CSV para ver los datos' : `Sin datos registrados para ${currentUser.country}`}
+                  {csvRows.length === 0 ? 'Cargue un archivo CSV para visualizar consumos' : `Sin datos CSV para ${currentUser.country}`}
                 </p>
               ) : (
                 visibleCustomers.map(cust => (
