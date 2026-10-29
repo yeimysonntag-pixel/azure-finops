@@ -38,7 +38,8 @@ import {
   AlertCircle,
   KeyRound,
   UserPlus,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -50,7 +51,10 @@ interface AppUser {
   country: string;
 }
 
-const STORAGE_USERS_KEY = 'finops_app_users_v2';
+// Configuración de sincronización compartida
+const LOCAL_STORAGE_USERS = 'finops_app_users_v3';
+const LOCAL_STORAGE_CSV = 'finops_app_csv_rows_v3';
+const LOCAL_STORAGE_FILES = 'finops_app_loaded_files_v3';
 
 const DEFAULT_USERS: AppUser[] = [
   { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
@@ -63,6 +67,7 @@ export default function App() {
   const [loginEmailInput, setLoginEmailInput] = useState<string>('');
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const ADMIN_PASSWORD_SECRET = 'Tivit2026!';
   const PRIMARY_ADMIN_EMAIL = 'yeimy.sonntag@tivit.com';
@@ -74,18 +79,35 @@ export default function App() {
     country: 'Todos'
   });
 
-  // Lista de Usuarios
+  // 1. Estado de Usuarios
   const [usersList, setUsersList] = useState<AppUser[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_USERS_KEY);
+      const saved = localStorage.getItem(LOCAL_STORAGE_USERS);
       return saved ? JSON.parse(saved) : DEFAULT_USERS;
     } catch {
       return DEFAULT_USERS;
     }
   });
 
-  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
-  const [loadedFiles, setLoadedFiles] = useState<string[]>([]);
+  // 2. Estado de Registros CSV y Archivos
+  const [csvRows, setCsvRows] = useState<CsvRow[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_CSV);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [loadedFiles, setLoadedFiles] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_FILES);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [selectedCostKey, setSelectedCostKey] = useState<string>('paygCostInUsd');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedCountryFilter, setSelectedCountryFilter] = useState<string>('Todos');
@@ -95,10 +117,48 @@ export default function App() {
   const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
   const [newUserCountry, setNewUserCountry] = useState<string>('Chile');
 
-  // Guardar usuarios en localStorage
+  // Sincronización continua en localStorage local
   useEffect(() => {
-    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
+    localStorage.setItem(LOCAL_STORAGE_USERS, JSON.stringify(usersList));
   }, [usersList]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_CSV, JSON.stringify(csvRows));
+      localStorage.setItem(LOCAL_STORAGE_FILES, JSON.stringify(loadedFiles));
+    } catch (e) {
+      console.warn('Límite de memoria local excedido.');
+    }
+  }, [csvRows, loadedFiles]);
+
+  // Carga opcional de respaldos estáticos del repositorio
+  const loadSharedDataset = async () => {
+    setIsSyncing(true);
+    try {
+      const response = await fetch('./data/consumos_global.csv');
+      if (response.ok) {
+        const text = await response.text();
+        Papa.parse<CsvRow>(text, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (result) => {
+            setCsvRows(result.data);
+            setLoadedFiles(['consumos_global.csv']);
+          }
+        });
+      }
+    } catch (e) {
+      console.log('No se encontró dataset público estático.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated && csvRows.length === 0) {
+      loadSharedDataset();
+    }
+  }, [isAuthenticated]);
 
   // AUTENTICACIÓN
   const handleLogin = (e: FormEvent) => {
@@ -191,6 +251,16 @@ export default function App() {
     });
   };
 
+  const handleClearData = () => {
+    if (window.confirm('¿Deseas limpiar todos los consumos cargados?')) {
+      setCsvRows([]);
+      setLoadedFiles([]);
+      setSelectedCustomer(null);
+      localStorage.removeItem(LOCAL_STORAGE_CSV);
+      localStorage.removeItem(LOCAL_STORAGE_FILES);
+    }
+  };
+
   const periodDetected = useMemo(() => {
     if (!csvRows.length) return '202609';
     const sample = csvRows.find(r => r.billingPeriodEndDate || r.date)?.billingPeriodEndDate;
@@ -203,7 +273,6 @@ export default function App() {
     const list: CustomerGroup[] = [];
 
     csvRows.forEach(row => {
-      // Normalizar nombres de columnas
       const custName = 
         row.customerName || 
         row.CustomerName || 
@@ -214,7 +283,6 @@ export default function App() {
       const fileRef = (row as any)._sourceFileName || '';
       const country = detectCountry(`${custName}_${row.invoiceSectionName || ''}_${fileRef}`);
 
-      // Normalizar costo numérico
       const rawCost = row[selectedCostKey] || row.paygCostInUsd || row.Cost || row.costInUsd || 0;
       const cost = parseFloat(String(rawCost).replace(',', '.')) || 0;
 
@@ -289,7 +357,7 @@ export default function App() {
     };
   }, [selectedCustomer, selectedCostKey]);
 
-  // GESTIÓN DE ROLES POR EL ADMIN
+  // REGISTRO Y GESTIÓN DE ROLES POR EL ADMIN
   const handleAddUser = (e: FormEvent) => {
     e.preventDefault();
     const cleanNewEmail = newUserEmail.trim().toLowerCase();
@@ -300,7 +368,7 @@ export default function App() {
     }
 
     if (usersList.some(u => u.email.toLowerCase() === cleanNewEmail)) {
-      alert('El usuario ya existe en la lista.');
+      alert('El usuario ya se encuentra registrado.');
       return;
     }
 
@@ -462,6 +530,9 @@ export default function App() {
                     <span className="text-xs font-bold text-slate-700">
                       {loadedFiles.length} archivo(s) ({csvRows.length.toLocaleString()} filas)
                     </span>
+                    <button onClick={handleClearData} className="text-xs text-red-600 hover:underline ml-2">
+                      Limpiar
+                    </button>
                   </div>
                 )}
               </div>
