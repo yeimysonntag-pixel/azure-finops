@@ -33,11 +33,11 @@ import {
   UserCheck,
   Lock,
   AlertCircle,
-  KeyRound,
   UserPlus,
   Trash2,
   RefreshCw,
-  Scissors
+  Scissors,
+  Loader2
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -49,25 +49,24 @@ interface AppUser {
   country: string;
 }
 
-const STORAGE_USERS_KEY = 'tivit_finops_users_v17';
-const STORAGE_CSV_KEY = 'tivit_finops_csv_v17';
-const STORAGE_FILES_KEY = 'tivit_finops_files_v17';
+const STORAGE_USERS_KEY = 'tivit_finops_users_v22';
 
 const DEFAULT_USERS: AppUser[] = [
-  { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
-  { id: 2, email: 'colombia.mgr@tivit.com', role: 'user', country: 'Colombia' },
-  { id: 3, email: 'peru.mgr@tivit.com', role: 'user', country: 'Perú' },
-  { id: 4, email: 'lorena.romero@tivit.com', role: 'user', country: 'Todos' },
-  { id: 5, email: 'nora.rivera@tivit.com', role: 'user', country: 'Todos' },
-  { id: 6, email: 'jorge.quiroz@tivit.com', role: 'user', country: 'Todos' },
-  { id: 7, email: 'marcelo.fernandez@tivit.com', role: 'user', country: 'Todos' },
-  { id: 8, email: 'rafael.sarmiento@tivit.com', role: 'user', country: 'Todos' },
-  { id: 9, email: 'johana.arroyave@tivit.com', role: 'user', country: 'Todos' },
-  { id: 10, email: 'danny.tambo@tivit.com', role: 'user', country: 'Todos' },
-  { id: 11, email: 'fabio.castellanos@tivit.com', role: 'user', country: 'Todos' },
-  { id: 12, email: 'darwin.jimenez@tivit.com', role: 'user', country: 'Todos' },
-  { id: 13, email: 'diego.mejiaa@tivit.com', role: 'user', country: 'Todos' },
-  { id: 14, email: 'roger.ungaro@tivit.com', role: 'user', country: 'Todos' }
+  { id: 0, email: 'yeimy.sonntag@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 1, email: 'chile.mgr@tivit.cl', role: 'admin', country: 'Todos' },
+  { id: 2, email: 'colombia.mgr@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 3, email: 'peru.mgr@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 4, email: 'lorena.romero@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 5, email: 'nora.rivera@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 6, email: 'jorge.quiroz@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 7, email: 'marcelo.fernandez@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 8, email: 'rafael.sarmiento@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 9, email: 'johana.arroyave@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 10, email: 'danny.tambo@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 11, email: 'fabio.castellanos@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 12, email: 'darwin.jimenez@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 13, email: 'diego.mejiaa@tivit.com', role: 'admin', country: 'Todos' },
+  { id: 14, email: 'roger.ungaro@tivit.com', role: 'admin', country: 'Todos' }
 ];
 
 const detectCountryByFileNameOrRow = (fileName: string, row: any): string => {
@@ -89,23 +88,50 @@ const detectCountryByFileNameOrRow = (fileName: string, row: any): string => {
 
 const parseScientificCost = (value: any): number => {
   if (value === undefined || value === null || value === '') return 0;
-  const cleanStr = String(value).replace(',', '.').trim();
+  const cleanStr = String(value).replace('$', '').replace(',', '.').trim();
   const num = Number(cleanStr);
   return isNaN(num) ? 0 : num;
 };
 
-const extractRealCustomerName = (row: any): string => {
-  if (row.customerName && String(row.customerName).trim() !== '') {
-    return String(row.customerName).trim();
-  }
-  if (row.invoiceSectionName && String(row.invoiceSectionName).trim() !== '') {
-    return String(row.invoiceSectionName).trim();
-  }
-
+const extractCostValue = (row: any): string => {
   const keys = Object.keys(row);
-  const candidates = ['subscriptionName', 'accountName', 'resourceGroup', 'partnerTenantTitle'];
+  const costCandidates = [
+    'paygCostInUsd',
+    'costInUsd',
+    'CostInUsd',
+    'Cost',
+    'cost',
+    'PreTaxCost',
+    'CostInBillingCurrency',
+    'ExtendedCost',
+    'EffectivePrice'
+  ];
+
+  for (const candidate of costCandidates) {
+    const matchedKey = keys.find((k) => k.trim().toLowerCase() === candidate.toLowerCase());
+    if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== '') {
+      return String(row[matchedKey]);
+    }
+  }
+  return '0';
+};
+
+const extractRealCustomerName = (row: any): string => {
+  const keys = Object.keys(row);
+  const candidates = [
+    'customerName',
+    'invoiceSectionName',
+    'subscriptionName',
+    'SubscriptionName',
+    'accountName',
+    'AccountName',
+    'resourceGroup',
+    'ResourceGroup',
+    'partnerTenantTitle'
+  ];
+
   for (const candidate of candidates) {
-    const matchedKey = keys.find(k => k.trim().toLowerCase() === candidate.toLowerCase());
+    const matchedKey = keys.find((k) => k.trim().toLowerCase() === candidate.toLowerCase());
     if (matchedKey && row[matchedKey] && String(row[matchedKey]).trim() !== '') {
       return String(row[matchedKey]).trim();
     }
@@ -114,13 +140,24 @@ const extractRealCustomerName = (row: any): string => {
   return 'Cliente_General';
 };
 
+const getField = (row: any, candidates: string[], fallback = ''): string => {
+  const keys = Object.keys(row);
+  for (const candidate of candidates) {
+    const matchedKey = keys.find((k) => k.trim().toLowerCase() === candidate.toLowerCase());
+    if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== null) {
+      return String(row[matchedKey]).trim();
+    }
+  }
+  return fallback;
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [loginEmailInput, setLoginEmailInput] = useState<string>('');
-  const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [manualUploadDone, setManualUploadDone] = useState<boolean>(false);
 
-  const ADMIN_PASSWORD_SECRET = 'Tivit2026!';
   const PRIMARY_ADMIN_EMAIL = 'yeimy.sonntag@tivit.com';
 
   const [currentUser, setCurrentUser] = useState<AppUser>({
@@ -133,29 +170,25 @@ export default function App() {
   const [usersList, setUsersList] = useState<AppUser[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_USERS_KEY);
-      return saved ? JSON.parse(saved) : DEFAULT_USERS;
+      if (!saved) return DEFAULT_USERS;
+      const parsed: AppUser[] = JSON.parse(saved);
+      const merged = [...parsed];
+      DEFAULT_USERS.forEach((defUser) => {
+        const existingIndex = merged.findIndex((u) => u.email.toLowerCase() === defUser.email.toLowerCase());
+        if (existingIndex === -1) {
+          merged.push(defUser);
+        } else {
+          merged[existingIndex] = { ...merged[existingIndex], role: 'admin', country: 'Todos' };
+        }
+      });
+      return merged;
     } catch {
       return DEFAULT_USERS;
     }
   });
 
-  const [csvRows, setCsvRows] = useState<CsvRow[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_CSV_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [loadedFiles, setLoadedFiles] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_FILES_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [loadedFiles, setLoadedFiles] = useState<string[]>([]);
 
   const [selectedCostKey] = useState<string>('paygCostInUsd');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -163,33 +196,30 @@ export default function App() {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerGroup | null>(null);
 
   const [newUserEmail, setNewUserEmail] = useState<string>('');
-  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('admin');
   const [newUserCountry, setNewUserCountry] = useState<string>('Todos');
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
+    try {
+      localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
+    } catch {
+      // Ignorar si excede cuota
+    }
   }, [usersList]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_CSV_KEY, JSON.stringify(csvRows));
-      localStorage.setItem(STORAGE_FILES_KEY, JSON.stringify(loadedFiles));
-    } catch (e) {
-      console.warn('Memoria local satisfecha.');
-    }
-  }, [csvRows, loadedFiles]);
-
   const handleEmergencyPurge = () => {
-    if (window.confirm('¿Deseas purgar toda la memoria local y recargar la aplicación completamente limpia?')) {
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-    }
+    localStorage.clear();
+    sessionStorage.clear();
+    setCsvRows([]);
+    setLoadedFiles([]);
+    setSelectedCustomer(null);
+    setManualUploadDone(false);
+    window.location.reload();
   };
 
   useEffect(() => {
     const fetchRepoCsvFiles = async () => {
-      if (!isAuthenticated || csvRows.length > 0) return;
+      if (!isAuthenticated || csvRows.length > 0 || manualUploadDone) return;
 
       const filesToFetch = [
         './data/consumos_colombia.csv',
@@ -205,10 +235,14 @@ export default function App() {
           const res = await fetch(`${filePath}?t=${Date.now()}`);
           if (res.ok) {
             const csvText = await res.text();
+            if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
+              continue;
+            }
             const fileName = filePath.split('/').pop() || 'dataset.csv';
 
             Papa.parse<CsvRow>(csvText, {
               header: true,
+              delimiter: '',
               skipEmptyLines: true,
               complete: (result) => {
                 const rowsWithMeta = result.data.map((r: any) => {
@@ -218,7 +252,8 @@ export default function App() {
                   return {
                     ...r,
                     customerName: custName,
-                    invoiceSectionName: r.invoiceSectionName || custName,
+                    invoiceSectionName: getField(r, ['invoiceSectionName'], custName),
+                    paygCostInUsd: extractCostValue(r),
                     _sourceFileName: fileName,
                     _detectedCountry: detectedCountry
                   };
@@ -229,19 +264,19 @@ export default function App() {
               }
             });
           }
-        } catch (e) {
+        } catch {
           // Archivo opcional aún no publicado
         }
       }
 
-      if (combinedRows.length > 0) {
+      if (combinedRows.length > 0 && !manualUploadDone) {
         setCsvRows(combinedRows);
         setLoadedFiles(loadedNames);
       }
     };
 
     fetchRepoCsvFiles();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, manualUploadDone]);
 
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
@@ -254,10 +289,6 @@ export default function App() {
     }
 
     if (cleanEmail === PRIMARY_ADMIN_EMAIL) {
-      if (adminPasswordInput !== ADMIN_PASSWORD_SECRET) {
-        setErrorMessage('Contraseña de administrador incorrecta.');
-        return;
-      }
       setCurrentUser({ id: 0, email: cleanEmail, role: 'admin', country: 'Todos' });
       setIsAuthenticated(true);
       return;
@@ -266,11 +297,6 @@ export default function App() {
     const registeredUser = usersList.find((u) => u.email.toLowerCase() === cleanEmail);
     if (!registeredUser) {
       setErrorMessage('Acceso denegado: Este correo no está autorizado por el Administrador.');
-      return;
-    }
-
-    if (registeredUser.role === 'admin' && adminPasswordInput !== ADMIN_PASSWORD_SECRET) {
-      setErrorMessage('Contraseña de administrador incorrecta.');
       return;
     }
 
@@ -286,82 +312,105 @@ export default function App() {
   const handleLogout = () => {
     setIsAuthenticated(false);
     setLoginEmailInput('');
-    setAdminPasswordInput('');
     setErrorMessage('');
   };
 
   const handleFileUploadAndMapping = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
 
-    const file = files[0];
+    const file = fileList[0];
+    const inputElement = e.target;
+    setIsProcessing(true);
+    setManualUploadDone(true);
 
     Papa.parse<CsvRow>(file, {
       header: true,
+      delimiter: '',
       skipEmptyLines: true,
       complete: (result) => {
-        const rawData = result.data;
-        if (!rawData || rawData.length === 0) return;
-
-        const rowsByCountry: Record<string, any[]> = {
-          Chile: [],
-          Colombia: [],
-          Perú: []
-        };
-
-        const processedRows: CsvRow[] = rawData.map((row: any) => {
-          const rawCustomerName = extractRealCustomerName(row);
-          const detectedCountry = detectCountryByFileNameOrRow(file.name, row);
-
-          const cleanRow = {
-            customerName: rawCustomerName,
-            invoiceSectionName: row.invoiceSectionName || rawCustomerName,
-            meterId: row.meterId || '',
-            chargeType: row.chargeType || 'Usage',
-            meterName: row.meterName || '',
-            meterCategory: row.meterCategory || 'Otros',
-            meterSubCategory: row.meterSubCategory || '',
-            serviceFamily: row.serviceFamily || '',
-            product: row.product || '',
-            payGPrice: String(row.payGPrice || '0'),
-            date: row.date || '',
-            unitOfMeasure: row.unitOfMeasure || '',
-            quantity: String(row.quantity || '0'),
-            paygCostInUsd: String(row.paygCostInUsd || row.costInUsd || row.Cost || 0)
-          };
-
-          if (rowsByCountry[detectedCountry]) {
-            rowsByCountry[detectedCountry].push(cleanRow);
-          } else {
-            rowsByCountry['Colombia'].push(cleanRow);
+        try {
+          const rawData = result.data;
+          if (!rawData || rawData.length === 0) {
+            alert('El archivo CSV seleccionado está vacío o no tiene columnas válidas.');
+            setIsProcessing(false);
+            inputElement.value = '';
+            return;
           }
 
-          return {
-            ...cleanRow,
-            _sourceFileName: file.name,
-            _detectedCountry: detectedCountry
+          const rowsByCountry: Record<string, any[]> = {
+            Chile: [],
+            Colombia: [],
+            Perú: []
           };
-        });
 
-        Object.entries(rowsByCountry).forEach(([country, rows]) => {
-          if (rows.length > 0) {
-            const csvOutput = Papa.unparse(rows);
-            const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.setAttribute('href', url);
-            link.setAttribute('download', `consumos_${country.toLowerCase().replace('ú', 'u')}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+          const processedRows: CsvRow[] = rawData.map((row: any) => {
+            const rawCustomerName = extractRealCustomerName(row);
+            const detectedCountry = detectCountryByFileNameOrRow(file.name, row);
+            const costStr = extractCostValue(row);
+
+            const cleanRow = {
+              customerName: rawCustomerName,
+              invoiceSectionName: getField(row, ['invoiceSectionName'], rawCustomerName),
+              meterId: getField(row, ['meterId', 'MeterId']),
+              chargeType: getField(row, ['chargeType', 'ChargeType'], 'Usage'),
+              meterName: getField(row, ['meterName', 'MeterName']),
+              meterCategory: getField(row, ['meterCategory', 'MeterCategory', 'ConsumedService'], 'Otros'),
+              meterSubCategory: getField(row, ['meterSubCategory', 'MeterSubCategory']),
+              serviceFamily: getField(row, ['serviceFamily', 'ServiceFamily']),
+              product: getField(row, ['product', 'Product', 'ProductName']),
+              payGPrice: getField(row, ['payGPrice', 'UnitPrice', 'EffectivePrice'], '0'),
+              date: getField(row, ['date', 'Date', 'UsageDateTime']),
+              unitOfMeasure: getField(row, ['unitOfMeasure', 'UnitOfMeasure']),
+              quantity: getField(row, ['quantity', 'Quantity', 'ConsumedQuantity'], '0'),
+              paygCostInUsd: costStr
+            };
+
+            if (rowsByCountry[detectedCountry]) {
+              rowsByCountry[detectedCountry].push(cleanRow);
+            } else {
+              rowsByCountry['Colombia'].push(cleanRow);
+            }
+
+            return {
+              ...cleanRow,
+              _sourceFileName: file.name,
+              _detectedCountry: detectedCountry
+            };
+          });
+
+          if (currentUser.role === 'admin') {
+            Object.entries(rowsByCountry).forEach(([country, rows]) => {
+              if (rows.length > 0) {
+                const csvOutput = Papa.unparse(rows);
+                const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', `consumos_${country.toLowerCase().replace('ú', 'u')}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }
+            });
           }
-        });
 
-        setCsvRows(processedRows);
-        setLoadedFiles([file.name]);
-        setSelectedCustomer(null);
-
-        alert('¡CSV procesado con éxito! Se han descargado automáticamente los archivos livianos por país (consumos_colombia.csv, etc.) para que los coloques en public/data/.');
+          setCsvRows(processedRows);
+          setLoadedFiles([file.name]);
+          setSelectedCustomer(null);
+        } catch (err) {
+          console.error('Error procesando el CSV:', err);
+          alert('Ocurrió un error al procesar el archivo CSV.');
+        } finally {
+          setIsProcessing(false);
+          inputElement.value = '';
+        }
+      },
+      error: (err) => {
+        console.error('Error PapaParse:', err);
+        alert('No se pudo leer el archivo CSV. Asegúrate de que no esté abierto o bloqueado por otro programa.');
+        setIsProcessing(false);
+        inputElement.value = '';
       }
     });
   };
@@ -500,11 +549,6 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    const cleanInputEmail = loginEmailInput.trim().toLowerCase();
-    const isPrimaryAdmin = cleanInputEmail === PRIMARY_ADMIN_EMAIL;
-    const registeredUserObj = usersList.find((u) => u.email.toLowerCase() === cleanInputEmail);
-    const requiresPassword = isPrimaryAdmin || registeredUserObj?.role === 'admin';
-
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md space-y-6">
@@ -513,7 +557,7 @@ export default function App() {
               <Lock className="w-6 h-6" />
             </div>
             <h1 className="text-xl font-extrabold text-slate-900">TIVIT Azure FinOps Portal</h1>
-            <p className="text-xs text-slate-500">Acceso restringido a personal autorizado (@tivit.com / @tivit.cl)</p>
+            <p className="text-xs text-slate-500">Acceso directo para administradores autorizados (@tivit.com / @tivit.cl)</p>
           </div>
 
           {errorMessage && (
@@ -538,23 +582,6 @@ export default function App() {
                 required
               />
             </div>
-
-            {requiresPassword && (
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700 flex items-center space-x-1">
-                  <KeyRound className="w-3.5 h-3.5 text-sky-600" />
-                  <span>Contraseña Administrador</span>
-                </label>
-                <input
-                  type="password"
-                  placeholder="Ingrese su clave secreta"
-                  value={adminPasswordInput}
-                  onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  className="w-full border border-slate-300 p-3 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none"
-                  required
-                />
-              </div>
-            )}
 
             <button
               type="submit"
@@ -617,44 +644,53 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {currentUser.role === 'admin' ? (
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm col-span-1 md:col-span-2 flex flex-col justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                  <Scissors className="w-4 h-4 text-sky-600" />
-                  <span>Procesar y Fragmentar CSV Masivo</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">Sube el CSV masivo de Azure. Se limpiará y descargará automáticamente separado por país.</p>
-              </div>
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm col-span-1 md:col-span-2 flex flex-col justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+                <Scissors className="w-4 h-4 text-sky-600" />
+                <span>Cargar y Procesar Archivo CSV de Azure</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Selecciona tu archivo CSV de consumos de Azure para visualizar métricas al instante y descargar los extractos limpios por país.
+              </p>
+            </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <label className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow flex items-center space-x-2">
-                  <Upload className="w-4 h-4" />
-                  <span>Seleccionar CSV Pesado</span>
-                  <input type="file" accept=".csv" onChange={handleFileUploadAndMapping} className="hidden" />
-                </label>
-
-                {loadedFiles.length > 0 && (
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span className="text-xs font-bold text-slate-700">
-                      {csvRows.length.toLocaleString()} filas procesadas
-                    </span>
-                  </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <label
+                htmlFor="csv-file-upload"
+                className={`bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow flex items-center space-x-2 ${isProcessing ? 'opacity-60 pointer-events-none' : ''}`}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Procesando archivo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>Seleccionar Archivo CSV</span>
+                  </>
                 )}
-              </div>
+              </label>
+              <input
+                id="csv-file-upload"
+                type="file"
+                accept=".csv,text/csv,application/vnd.ms-excel"
+                onChange={handleFileUploadAndMapping}
+                disabled={isProcessing}
+                className="hidden"
+              />
+
+              {loadedFiles.length > 0 && !isProcessing && (
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-bold text-slate-700">
+                    {csvRows.length.toLocaleString()} filas cargadas ({loadedFiles[0]})
+                  </span>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm col-span-1 md:col-span-2 flex items-center space-x-4">
-              <div className="bg-sky-50 p-3 rounded-2xl text-sky-600">
-                <Globe className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-slate-900">Operación Asignada: {currentUser.country}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Acceso a informes e indicadores de {currentUser.country}.</p>
-              </div>
-            </div>
-          )}
+          </div>
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">
@@ -785,8 +821,8 @@ export default function App() {
                         onChange={(e) => setNewUserRole(e.target.value as 'admin' | 'user')}
                         className="w-full border p-2 text-xs rounded-lg bg-slate-50"
                       >
-                        <option value="user">Usuario / Auditor</option>
                         <option value="admin">Administrador</option>
+                        <option value="user">Usuario / Auditor</option>
                       </select>
                     </div>
 
@@ -830,12 +866,14 @@ export default function App() {
                             {user.role === 'admin' ? 'Hacer Usuario' : 'Hacer Admin'}
                           </button>
 
-                          <button
-                            onClick={() => handleDeleteUser(user.id, user.email)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded transition"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {user.email !== PRIMARY_ADMIN_EMAIL && (
+                            <button
+                              onClick={() => handleDeleteUser(user.id, user.email)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
