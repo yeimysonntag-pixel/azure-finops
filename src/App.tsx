@@ -11,10 +11,8 @@ import {
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
 
-// Importación estricta de tipos e interfaces
 import type { CsvRow, CustomerGroup } from './utils/excelGenerator';
 import {
-  detectCountry,
   exportSingleCustomerExcel,
   exportAllCustomersZip
 } from './utils/excelGenerator';
@@ -23,7 +21,6 @@ import { exportCustomerPdf } from './utils/pdfGenerator';
 import {
   Upload,
   Download,
-  FileSpreadsheet,
   FileText,
   Search,
   BarChart3,
@@ -38,7 +35,9 @@ import {
   AlertCircle,
   KeyRound,
   UserPlus,
-  Trash2
+  Trash2,
+  RefreshCw,
+  Scissors
 } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -50,15 +49,70 @@ interface AppUser {
   country: string;
 }
 
-const STORAGE_USERS_KEY = 'tivit_finops_users_v4';
-const STORAGE_CSV_KEY = 'tivit_finops_csv_v4';
-const STORAGE_FILES_KEY = 'tivit_finops_files_v4';
+const STORAGE_USERS_KEY = 'tivit_finops_users_v17';
+const STORAGE_CSV_KEY = 'tivit_finops_csv_v17';
+const STORAGE_FILES_KEY = 'tivit_finops_files_v17';
 
 const DEFAULT_USERS: AppUser[] = [
   { id: 1, email: 'chile.mgr@tivit.cl', role: 'user', country: 'Chile' },
   { id: 2, email: 'colombia.mgr@tivit.com', role: 'user', country: 'Colombia' },
-  { id: 3, email: 'peru.mgr@tivit.com', role: 'user', country: 'Perú' }
+  { id: 3, email: 'peru.mgr@tivit.com', role: 'user', country: 'Perú' },
+  { id: 4, email: 'lorena.romero@tivit.com', role: 'user', country: 'Todos' },
+  { id: 5, email: 'nora.rivera@tivit.com', role: 'user', country: 'Todos' },
+  { id: 6, email: 'jorge.quiroz@tivit.com', role: 'user', country: 'Todos' },
+  { id: 7, email: 'marcelo.fernandez@tivit.com', role: 'user', country: 'Todos' },
+  { id: 8, email: 'rafael.sarmiento@tivit.com', role: 'user', country: 'Todos' },
+  { id: 9, email: 'johana.arroyave@tivit.com', role: 'user', country: 'Todos' },
+  { id: 10, email: 'danny.tambo@tivit.com', role: 'user', country: 'Todos' },
+  { id: 11, email: 'fabio.castellanos@tivit.com', role: 'user', country: 'Todos' },
+  { id: 12, email: 'darwin.jimenez@tivit.com', role: 'user', country: 'Todos' },
+  { id: 13, email: 'diego.mejiaa@tivit.com', role: 'user', country: 'Todos' },
+  { id: 14, email: 'roger.ungaro@tivit.com', role: 'user', country: 'Todos' }
 ];
+
+const detectCountryByFileNameOrRow = (fileName: string, row: any): string => {
+  const cleanFileName = fileName.toLowerCase();
+
+  if (cleanFileName.includes('colombia')) return 'Colombia';
+  if (cleanFileName.includes('peru')) return 'Perú';
+  if (cleanFileName.includes('chile')) return 'Chile';
+  if (cleanFileName.includes('mexico')) return 'México';
+
+  const rowText = JSON.stringify(row).toLowerCase();
+  if (/colombia|\bco\b|bogota/i.test(rowText)) return 'Colombia';
+  if (/peru|perú|\bpe\b|lima/i.test(rowText)) return 'Perú';
+  if (/chile|\bcl\b|santiago/i.test(rowText)) return 'Chile';
+  if (/mexico|méxico|\bmx\b/i.test(rowText)) return 'México';
+
+  return 'Colombia';
+};
+
+const parseScientificCost = (value: any): number => {
+  if (value === undefined || value === null || value === '') return 0;
+  const cleanStr = String(value).replace(',', '.').trim();
+  const num = Number(cleanStr);
+  return isNaN(num) ? 0 : num;
+};
+
+const extractRealCustomerName = (row: any): string => {
+  if (row.customerName && String(row.customerName).trim() !== '') {
+    return String(row.customerName).trim();
+  }
+  if (row.invoiceSectionName && String(row.invoiceSectionName).trim() !== '') {
+    return String(row.invoiceSectionName).trim();
+  }
+
+  const keys = Object.keys(row);
+  const candidates = ['subscriptionName', 'accountName', 'resourceGroup', 'partnerTenantTitle'];
+  for (const candidate of candidates) {
+    const matchedKey = keys.find(k => k.trim().toLowerCase() === candidate.toLowerCase());
+    if (matchedKey && row[matchedKey] && String(row[matchedKey]).trim() !== '') {
+      return String(row[matchedKey]).trim();
+    }
+  }
+
+  return 'Cliente_General';
+};
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -76,7 +130,6 @@ export default function App() {
     country: 'Todos'
   });
 
-  // 1. USUARIOS GUARDADOS (PERSISTENCIA)
   const [usersList, setUsersList] = useState<AppUser[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_USERS_KEY);
@@ -86,7 +139,6 @@ export default function App() {
     }
   });
 
-  // 2. REGISTROS CSV GUARDADOS
   const [csvRows, setCsvRows] = useState<CsvRow[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_CSV_KEY);
@@ -105,89 +157,99 @@ export default function App() {
     }
   });
 
-  const [selectedCostKey, setSelectedCostKey] = useState<string>('paygCostInUsd');
+  const [selectedCostKey] = useState<string>('paygCostInUsd');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedCountryFilter, setSelectedCountryFilter] = useState<string>('Todos');
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerGroup | null>(null);
 
   const [newUserEmail, setNewUserEmail] = useState<string>('');
   const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
-  const [newUserCountry, setNewUserCountry] = useState<string>('Chile');
+  const [newUserCountry, setNewUserCountry] = useState<string>('Todos');
 
-  // Guardar usuarios creados automáticamente
   useEffect(() => {
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
   }, [usersList]);
 
-  // Guardar CSVs procesados automáticamente
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_CSV_KEY, JSON.stringify(csvRows));
       localStorage.setItem(STORAGE_FILES_KEY, JSON.stringify(loadedFiles));
     } catch (e) {
-      console.warn('Almacenamiento de navegador lleno.');
+      console.warn('Memoria local satisfecha.');
     }
   }, [csvRows, loadedFiles]);
 
-  // CARGA AUTOMÁTICA DE ARCHIVOS CSV DESDE EL REPOSITORIO (PÚBLICOS)
+  const handleEmergencyPurge = () => {
+    if (window.confirm('¿Deseas purgar toda la memoria local y recargar la aplicación completamente limpia?')) {
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    }
+  };
+
   useEffect(() => {
     const fetchRepoCsvFiles = async () => {
-      if (csvRows.length > 0) return; // Si ya hay datos, no reescribir
+      if (!isAuthenticated || csvRows.length > 0) return;
 
-      const repoCsvPaths = [
-        './data/consumos_chile.csv',
+      const filesToFetch = [
         './data/consumos_colombia.csv',
+        './data/consumos_chile.csv',
         './data/consumos_peru.csv'
       ];
 
-      let allRows: CsvRow[] = [];
+      let combinedRows: CsvRow[] = [];
       let loadedNames: string[] = [];
 
-      for (const path of repoCsvPaths) {
+      for (const filePath of filesToFetch) {
         try {
-          const res = await fetch(path);
+          const res = await fetch(`${filePath}?t=${Date.now()}`);
           if (res.ok) {
             const csvText = await res.text();
-            const fileName = path.split('/').pop() || 'archivo.csv';
-            
+            const fileName = filePath.split('/').pop() || 'dataset.csv';
+
             Papa.parse<CsvRow>(csvText, {
               header: true,
               skipEmptyLines: true,
-              complete: (results) => {
-                const rowsWithSource = results.data.map(r => ({
-                  ...r,
-                  _sourceFileName: fileName
-                }));
-                allRows = [...allRows, ...rowsWithSource];
+              complete: (result) => {
+                const rowsWithMeta = result.data.map((r: any) => {
+                  const custName = extractRealCustomerName(r);
+                  const detectedCountry = detectCountryByFileNameOrRow(fileName, r);
+
+                  return {
+                    ...r,
+                    customerName: custName,
+                    invoiceSectionName: r.invoiceSectionName || custName,
+                    _sourceFileName: fileName,
+                    _detectedCountry: detectedCountry
+                  };
+                });
+
+                combinedRows = [...combinedRows, ...rowsWithMeta];
                 loadedNames.push(fileName);
               }
             });
           }
         } catch (e) {
-          console.log('Esperando archivo CSV público...');
+          // Archivo opcional aún no publicado
         }
       }
 
-      if (allRows.length > 0) {
-        setCsvRows(allRows);
+      if (combinedRows.length > 0) {
+        setCsvRows(combinedRows);
         setLoadedFiles(loadedNames);
       }
     };
 
-    if (isAuthenticated) {
-      fetchRepoCsvFiles();
-    }
+    fetchRepoCsvFiles();
   }, [isAuthenticated]);
 
-  // AUTENTICACIÓN
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     const cleanEmail = loginEmailInput.trim().toLowerCase();
 
-    const hasValidDomain = cleanEmail.endsWith('@tivit.com') || cleanEmail.endsWith('@tivit.cl');
-    if (!hasValidDomain) {
-      setErrorMessage('Acceso denegado: Debe usar su correo @tivit.com o @tivit.cl');
+    if (!cleanEmail.endsWith('@tivit.com') && !cleanEmail.endsWith('@tivit.cl')) {
+      setErrorMessage('Acceso denegado: Debe utilizar su correo corporativo @tivit.com o @tivit.cl');
       return;
     }
 
@@ -201,7 +263,7 @@ export default function App() {
       return;
     }
 
-    const registeredUser = usersList.find(u => u.email.toLowerCase() === cleanEmail);
+    const registeredUser = usersList.find((u) => u.email.toLowerCase() === cleanEmail);
     if (!registeredUser) {
       setErrorMessage('Acceso denegado: Este correo no está autorizado por el Administrador.');
       return;
@@ -228,82 +290,101 @@ export default function App() {
     setErrorMessage('');
   };
 
-  // PROCESAMIENTO MULTI-CSV
-  const handleMultipleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileUploadAndMapping = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const fileList = Array.from(files).slice(0, 3);
-    const fileNames = fileList.map(f => f.name);
+    const file = files[0];
 
-    let combinedRows: CsvRow[] = [];
-    let processedCount = 0;
+    Papa.parse<CsvRow>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (result) => {
+        const rawData = result.data;
+        if (!rawData || rawData.length === 0) return;
 
-    fileList.forEach(file => {
-      Papa.parse<CsvRow>(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (result) => {
-          const rowsWithRef = result.data.map(r => ({
-            ...r,
-            _sourceFileName: file.name
-          }));
+        const rowsByCountry: Record<string, any[]> = {
+          Chile: [],
+          Colombia: [],
+          Perú: []
+        };
 
-          combinedRows = [...combinedRows, ...rowsWithRef];
-          processedCount++;
+        const processedRows: CsvRow[] = rawData.map((row: any) => {
+          const rawCustomerName = extractRealCustomerName(row);
+          const detectedCountry = detectCountryByFileNameOrRow(file.name, row);
 
-          if (processedCount === fileList.length) {
-            setCsvRows(combinedRows);
-            setLoadedFiles(fileNames);
+          const cleanRow = {
+            customerName: rawCustomerName,
+            invoiceSectionName: row.invoiceSectionName || rawCustomerName,
+            meterId: row.meterId || '',
+            chargeType: row.chargeType || 'Usage',
+            meterName: row.meterName || '',
+            meterCategory: row.meterCategory || 'Otros',
+            meterSubCategory: row.meterSubCategory || '',
+            serviceFamily: row.serviceFamily || '',
+            product: row.product || '',
+            payGPrice: String(row.payGPrice || '0'),
+            date: row.date || '',
+            unitOfMeasure: row.unitOfMeasure || '',
+            quantity: String(row.quantity || '0'),
+            paygCostInUsd: String(row.paygCostInUsd || row.costInUsd || row.Cost || 0)
+          };
 
-            if (combinedRows.length > 0) {
-              const sampleKeys = Object.keys(combinedRows[0]);
-              const costKey = sampleKeys.find(k => 
-                /cost|price|payg|monto/i.test(k)
-              ) || 'paygCostInUsd';
-              setSelectedCostKey(costKey);
-            }
-            setSelectedCustomer(null);
+          if (rowsByCountry[detectedCountry]) {
+            rowsByCountry[detectedCountry].push(cleanRow);
+          } else {
+            rowsByCountry['Colombia'].push(cleanRow);
           }
-        }
-      });
-    });
-  };
 
-  const handleClearData = () => {
-    if (window.confirm('¿Deseas limpiar todos los registros CSV procesados?')) {
-      setCsvRows([]);
-      setLoadedFiles([]);
-      setSelectedCustomer(null);
-      localStorage.removeItem(STORAGE_CSV_KEY);
-      localStorage.removeItem(STORAGE_FILES_KEY);
-    }
+          return {
+            ...cleanRow,
+            _sourceFileName: file.name,
+            _detectedCountry: detectedCountry
+          };
+        });
+
+        Object.entries(rowsByCountry).forEach(([country, rows]) => {
+          if (rows.length > 0) {
+            const csvOutput = Papa.unparse(rows);
+            const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `consumos_${country.toLowerCase().replace('ú', 'u')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }
+        });
+
+        setCsvRows(processedRows);
+        setLoadedFiles([file.name]);
+        setSelectedCustomer(null);
+
+        alert('¡CSV procesado con éxito! Se han descargado automáticamente los archivos livianos por país (consumos_colombia.csv, etc.) para que los coloques en public/data/.');
+      }
+    });
   };
 
   const periodDetected = useMemo(() => {
     if (!csvRows.length) return '202609';
-    const sample = csvRows.find(r => r.billingPeriodEndDate || r.date)?.billingPeriodEndDate;
-    return sample ? String(sample).replace(/[-/]/g, '').substring(0, 6) : '202609';
+    const sample = csvRows.find((r) => r.date)?.date;
+    if (!sample) return '202609';
+    const parts = String(sample).split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}${parts[1]}`;
+    }
+    return String(sample).replace(/[-/]/g, '').substring(0, 6);
   }, [csvRows]);
 
-  // AGRUPACIÓN MULTIPAÍS Y CLIENTE
   const { groupedByCountry, allCustomersList } = useMemo(() => {
     const countryMap: Record<string, Record<string, CustomerGroup>> = {};
     const list: CustomerGroup[] = [];
 
-    csvRows.forEach(row => {
-      const custName = 
-        row.customerName || 
-        row.CustomerName || 
-        row.invoiceSectionName || 
-        row.InvoiceSectionName || 
-        'Cliente_General';
-
-      const fileRef = (row as any)._sourceFileName || '';
-      const country = detectCountry(`${custName}_${row.invoiceSectionName || ''}_${fileRef}`);
-
-      const rawCost = row[selectedCostKey] || row.paygCostInUsd || row.Cost || row.costInUsd || 0;
-      const cost = parseFloat(String(rawCost).replace(',', '.')) || 0;
+    csvRows.forEach((row: any) => {
+      const custName = row.customerName || extractRealCustomerName(row);
+      const country = row._detectedCountry || detectCountryByFileNameOrRow(row._sourceFileName || '', row);
+      const cost = parseScientificCost(row.paygCostInUsd);
 
       if (!countryMap[country]) countryMap[country] = {};
 
@@ -323,20 +404,19 @@ export default function App() {
       group.totalCost += cost;
       group.records.push(row);
 
-      const category = row.meterCategory || row.MeterCategory || 'Otros';
+      const category = row.meterCategory || 'Otros';
       group.categoryTotals[category] = (group.categoryTotals[category] || 0) + cost;
     });
 
     return { groupedByCountry: countryMap, allCustomersList: list };
-  }, [csvRows, selectedCostKey]);
+  }, [csvRows]);
 
-  // FILTRADO DE CLIENTES VISIBLES
   const visibleCustomers = useMemo(() => {
-    return allCustomersList.filter(cust => {
+    return allCustomersList.filter((cust) => {
       if (currentUser.role === 'user' && currentUser.country !== 'Todos') {
         if (cust.country !== currentUser.country) return false;
       }
-      if (currentUser.role === 'admin' && selectedCountryFilter !== 'Todos') {
+      if ((currentUser.role === 'admin' || currentUser.country === 'Todos') && selectedCountryFilter !== 'Todos') {
         if (cust.country !== selectedCountryFilter) return false;
       }
       if (searchTerm && !cust.name.toLowerCase().includes(searchTerm.toLowerCase())) {
@@ -352,7 +432,7 @@ export default function App() {
 
   useEffect(() => {
     if (visibleCustomers.length > 0) {
-      if (!selectedCustomer || !visibleCustomers.some(c => c.name === selectedCustomer.name && c.country === selectedCustomer.country)) {
+      if (!selectedCustomer || !visibleCustomers.some((c) => c.name === selectedCustomer.name && c.country === selectedCustomer.country)) {
         setSelectedCustomer(visibleCustomers[0]);
       }
     } else {
@@ -364,11 +444,11 @@ export default function App() {
     if (!selectedCustomer) return null;
     const sorted = Object.entries(selectedCustomer.categoryTotals).sort((a, b) => b[1] - a[1]);
     return {
-      labels: sorted.map(e => e[0]),
+      labels: sorted.map((e) => e[0]),
       datasets: [
         {
           label: `Consumo USD (${selectedCostKey})`,
-          data: sorted.map(e => e[1]),
+          data: sorted.map((e) => e[1]),
           backgroundColor: '#0284c7',
           borderRadius: 6
         }
@@ -376,18 +456,17 @@ export default function App() {
     };
   }, [selectedCustomer, selectedCostKey]);
 
-  // AGREGAR Y GUARDAR USUARIOS
   const handleAddUser = (e: FormEvent) => {
     e.preventDefault();
     const cleanNewEmail = newUserEmail.trim().toLowerCase();
 
     if (!cleanNewEmail.endsWith('@tivit.com') && !cleanNewEmail.endsWith('@tivit.cl')) {
-      alert('Error: Solo se autorizan correos @tivit.com o @tivit.cl');
+      alert('Error: Solo se autorizan correos corporativos @tivit.com o @tivit.cl');
       return;
     }
 
-    if (usersList.some(u => u.email.toLowerCase() === cleanNewEmail)) {
-      alert('El usuario ya se encuentra registrado.');
+    if (usersList.some((u) => u.email.toLowerCase() === cleanNewEmail)) {
+      alert('El usuario ya está registrado.');
       return;
     }
 
@@ -398,30 +477,32 @@ export default function App() {
       country: newUserRole === 'admin' ? 'Todos' : newUserCountry
     };
 
-    setUsersList(prev => [...prev, newUser]);
+    setUsersList((prev) => [...prev, newUser]);
     setNewUserEmail('');
   };
 
   const handleToggleUserRole = (id: number) => {
-    setUsersList(prev => prev.map(u => {
-      if (u.id === id) {
-        const nextRole = u.role === 'admin' ? 'user' : 'admin';
-        return { ...u, role: nextRole, country: nextRole === 'admin' ? 'Todos' : u.country };
-      }
-      return u;
-    }));
+    setUsersList((prev) =>
+      prev.map((u) => {
+        if (u.id === id) {
+          const nextRole = u.role === 'admin' ? 'user' : 'admin';
+          return { ...u, role: nextRole, country: nextRole === 'admin' ? 'Todos' : u.country };
+        }
+        return u;
+      })
+    );
   };
 
   const handleDeleteUser = (id: number, email: string) => {
     if (window.confirm(`¿Deseas revocar el acceso a ${email}?`)) {
-      setUsersList(prev => prev.filter(u => u.id !== id));
+      setUsersList((prev) => prev.filter((u) => u.id !== id));
     }
   };
 
   if (!isAuthenticated) {
     const cleanInputEmail = loginEmailInput.trim().toLowerCase();
     const isPrimaryAdmin = cleanInputEmail === PRIMARY_ADMIN_EMAIL;
-    const registeredUserObj = usersList.find(u => u.email.toLowerCase() === cleanInputEmail);
+    const registeredUserObj = usersList.find((u) => u.email.toLowerCase() === cleanInputEmail);
     const requiresPassword = isPrimaryAdmin || registeredUserObj?.role === 'admin';
 
     return (
@@ -499,7 +580,9 @@ export default function App() {
             <div>
               <h1 className="font-extrabold text-base tracking-tight">Azure FinOps Manager</h1>
               <p className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">
-                {currentUser.role === 'admin' ? 'Gestión Consolidada Multipaís' : `Vista Asignada: ${currentUser.country}`}
+                {currentUser.role === 'admin' || currentUser.country === 'Todos'
+                  ? 'Gestión Consolidada Multipaís'
+                  : `Vista Asignada: ${currentUser.country}`}
               </p>
             </div>
           </div>
@@ -512,6 +595,14 @@ export default function App() {
                 {currentUser.role === 'admin' ? 'Administrador' : `Auditor ${currentUser.country}`}
               </span>
             </div>
+
+            <button
+              onClick={handleEmergencyPurge}
+              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg font-bold transition flex items-center space-x-1"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Purga Total</span>
+            </button>
 
             <button
               onClick={handleLogout}
@@ -530,28 +621,25 @@ export default function App() {
             <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm col-span-1 md:col-span-2 flex flex-col justify-between">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                  <Upload className="w-4 h-4 text-sky-600" />
-                  <span>Cargar Consumos Azure (Hasta 3 CSVs)</span>
+                  <Scissors className="w-4 h-4 text-sky-600" />
+                  <span>Procesar y Fragmentar CSV Masivo</span>
                 </h2>
-                <p className="text-xs text-slate-500 mt-1">Sube los extractos billing de la operación regional.</p>
+                <p className="text-xs text-slate-500 mt-1">Sube el CSV masivo de Azure. Se limpiará y descargará automáticamente separado por país.</p>
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <label className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow flex items-center space-x-2">
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Seleccionar Archivos CSV</span>
-                  <input type="file" accept=".csv" multiple onChange={handleMultipleFileUpload} className="hidden" />
+                  <Upload className="w-4 h-4" />
+                  <span>Seleccionar CSV Pesado</span>
+                  <input type="file" accept=".csv" onChange={handleFileUploadAndMapping} className="hidden" />
                 </label>
 
                 {loadedFiles.length > 0 && (
                   <div className="flex items-center space-x-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     <span className="text-xs font-bold text-slate-700">
-                      {loadedFiles.length} archivo(s) CSV ({csvRows.length.toLocaleString()} filas)
+                      {csvRows.length.toLocaleString()} filas procesadas
                     </span>
-                    <button onClick={handleClearData} className="text-xs text-red-600 hover:underline ml-2">
-                      Limpiar
-                    </button>
                   </div>
                 )}
               </div>
@@ -570,16 +658,20 @@ export default function App() {
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">
-              {currentUser.role === 'admin' ? 'Costo Total Consolidado' : `Costo Total (${currentUser.country})`}
+              {currentUser.role === 'admin' || currentUser.country === 'Todos'
+                ? 'Costo Total Consolidado'
+                : `Costo Total (${currentUser.country})`}
             </p>
-            <p className="text-2xl font-black text-slate-900 mt-1">${currentViewTotalCost.toFixed(2)} USD</p>
-            <p className="text-[10px] font-bold text-sky-600 mt-1">Periodo Procesado</p>
+            <p className="text-2xl font-black text-slate-900 mt-1">${currentViewTotalCost.toFixed(6)} USD</p>
+            <p className="text-[10px] font-bold text-sky-600 mt-1">Periodo Procesado: {periodDetected}</p>
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
             <div>
               <p className="text-xs font-semibold text-slate-500">
-                {currentUser.role === 'admin' ? 'Clientes Visibles' : `Clientes en ${currentUser.country}`}
+                {currentUser.role === 'admin' || currentUser.country === 'Todos'
+                  ? 'Clientes Visibles'
+                  : `Clientes en ${currentUser.country}`}
               </p>
               <p className="text-2xl font-black text-slate-900 mt-1">{visibleCustomers.length}</p>
             </div>
@@ -614,9 +706,9 @@ export default function App() {
               </div>
             </div>
 
-            {currentUser.role === 'admin' ? (
+            {currentUser.role === 'admin' || currentUser.country === 'Todos' ? (
               <div className="flex flex-wrap gap-1">
-                {['Todos', ...Object.keys(groupedByCountry)].map(country => (
+                {['Todos', ...Object.keys(groupedByCountry)].map((country) => (
                   <button
                     key={country}
                     onClick={() => setSelectedCountryFilter(country)}
@@ -640,10 +732,10 @@ export default function App() {
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
               {visibleCustomers.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-8">
-                  {csvRows.length === 0 ? 'Cargue un archivo CSV para visualizar consumos' : `Sin datos CSV para ${currentUser.country}`}
+                  {csvRows.length === 0 ? 'Cargue un CSV para visualizar métricas' : `Sin datos registrados para ${currentUser.country}`}
                 </p>
               ) : (
-                visibleCustomers.map(cust => (
+                visibleCustomers.map((cust) => (
                   <div
                     key={`${cust.country}_${cust.name}`}
                     onClick={() => setSelectedCustomer(cust)}
@@ -660,7 +752,7 @@ export default function App() {
                       </span>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-extrabold text-sky-700">${cust.totalCost.toFixed(2)}</p>
+                      <p className="text-xs font-extrabold text-sky-700">${cust.totalCost.toFixed(4)}</p>
                       <p className="text-[9px] text-slate-400">USD</p>
                     </div>
                   </div>
@@ -706,6 +798,7 @@ export default function App() {
                         disabled={newUserRole === 'admin'}
                         className="w-full border p-2 text-xs rounded-lg bg-slate-50 disabled:opacity-50"
                       >
+                        <option value="Todos">Todos los países</option>
                         <option value="Chile">Chile</option>
                         <option value="Colombia">Colombia</option>
                         <option value="Perú">Perú</option>
@@ -722,7 +815,7 @@ export default function App() {
                 <div className="space-y-1.5 pt-2">
                   <p className="text-[10px] font-bold text-slate-400 uppercase">Usuarios Autorizados ({usersList.length})</p>
                   <div className="max-h-28 overflow-y-auto space-y-1 custom-scrollbar">
-                    {usersList.map(user => (
+                    {usersList.map((user) => (
                       <div key={user.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg text-[11px]">
                         <div className="truncate max-w-[150px]">
                           <p className="font-bold text-slate-800 truncate">{user.email}</p>
@@ -766,7 +859,7 @@ export default function App() {
                   <div className="flex items-center space-x-3">
                     <div className="text-right mr-2">
                       <p className="text-xs text-slate-500 font-medium">Consumo Total</p>
-                      <p className="text-2xl font-black text-sky-700">${selectedCustomer.totalCost.toFixed(2)} USD</p>
+                      <p className="text-2xl font-black text-sky-700">${selectedCustomer.totalCost.toFixed(6)} USD</p>
                     </div>
 
                     <button
@@ -825,7 +918,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {selectedCustomer.records.map((r, i) => (
+                        {selectedCustomer.records.map((r: any, i: number) => (
                           <tr key={i} className="hover:bg-slate-50 transition">
                             <td className="p-2.5 font-medium text-slate-900">{r.invoiceSectionName || selectedCustomer.name}</td>
                             <td className="p-2.5 font-mono text-[10px] text-slate-400 truncate max-w-[90px]" title={r.meterId}>{r.meterId}</td>
@@ -836,11 +929,11 @@ export default function App() {
                             <td className="p-2.5">{r.serviceFamily}</td>
                             <td className="p-2.5 truncate max-w-[100px]" title={r.product}>{r.product}</td>
                             <td className="p-2.5">${parseFloat(String(r.payGPrice || 0)).toFixed(4)}</td>
-                            <td className="p-2.5 whitespace-nowrap">{r.date || r.billingPeriodEndDate}</td>
+                            <td className="p-2.5 whitespace-nowrap">{r.date}</td>
                             <td className="p-2.5">{r.unitOfMeasure}</td>
                             <td className="p-2.5">{r.quantity}</td>
                             <td className="p-2.5 font-extrabold text-emerald-600 whitespace-nowrap">
-                              ${parseFloat(String(r[selectedCostKey] || r.paygCostInUsd || 0)).toFixed(2)}
+                              ${parseScientificCost(r.paygCostInUsd).toFixed(6)}
                             </td>
                           </tr>
                         ))}
